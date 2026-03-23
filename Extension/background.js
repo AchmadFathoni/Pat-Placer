@@ -1,95 +1,122 @@
-/**
- * PatPlacer - Background Service Worker
- * Handles script injection into page MAIN world
- */
-
-// Listen for messages from content script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'executeScript') {
-    executeLocalScript(sender.tab.id, message.scriptName)
-      .then(() => sendResponse({ success: true }))
-      .catch((error) => sendResponse({ success: false, error: error.message }));
-    return true; // Keep message channel open for async response
+﻿chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.action !== 'loadTool') {
+    return false;
   }
-  
-  if (message.action === 'injectCSS') {
-    injectCSS(sender.tab.id, message.cssName)
-      .then(() => sendResponse({ success: true }))
-      .catch((error) => sendResponse({ success: false, error: error.message }));
-    return true;
-  }
-});
 
-/**
- * Execute a local script file in the page's MAIN world
- * This allows the script to access page variables like window.__svelte
- */
-async function executeLocalScript(tabId, scriptName) {
-  try {
-    const scriptUrl = chrome.runtime.getURL(`scripts/${scriptName}`);
-    const response = await fetch(scriptUrl);
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch script: ${scriptName}`);
+  const tabId = sender?.tab?.id;
+  if (!tabId) {
+    sendResponse({ success: false, error: 'No active tab' });
+    return false;
+  }
+
+  const tool = typeof message.tool === 'string' ? message.tool : 'patplacer';
+
+  (async () => {
+    try {
+      async function loadExtensionText(relativePath) {
+        const url = chrome.runtime.getURL(relativePath);
+        const resp = await fetch(`${url}?v=${Date.now()}`);
+        if (!resp.ok) {
+          throw new Error(`Failed to load ${relativePath}: ${resp.status}`);
+        }
+        return await resp.text();
+      }
+
+      const cssText = await loadExtensionText('styles/patplacer.css');
+      const iconsBaseUrl = chrome.runtime.getURL('icons/');
+
+      const toolMap = {
+        patplacer: [
+          { id: 'patplacer-image-processor-script', path: 'scripts/image-processor.js' },
+          { id: 'patplacer-main-script', path: 'scripts/patplacer-main.js' }
+        ],
+        extractor: [
+          { id: 'patplacer-extractor-script', path: 'scripts/art-extractor.js' }
+        ],
+        repair: [
+          { id: 'patplacer-repair-script', path: 'scripts/repair-tool.js' }
+        ]
+      };
+
+      const scripts = toolMap[tool] || toolMap.patplacer;
+      const scriptsWithCode = [];
+      for (const script of scripts) {
+        scriptsWithCode.push({
+          id: script.id,
+          code: await loadExtensionText(script.path)
+        });
+      }
+
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        args: [{ cssText, iconsBaseUrl, scriptsWithCode, tool }],
+        func: async (assets) => {
+          function injectCss(css) {
+            const existing = document.getElementById('patplacer-styles-inline');
+            if (existing) existing.remove();
+
+            const style = document.createElement('style');
+            style.id = 'patplacer-styles-inline';
+            style.textContent = css;
+            document.head.appendChild(style);
+          }
+
+          function loadScriptBlob(code, id) {
+            return new Promise((resolve, reject) => {
+              if (document.getElementById(id)) {
+                resolve();
+                return;
+              }
+
+              const blob = new Blob([code], { type: 'application/javascript' });
+              const blobUrl = URL.createObjectURL(blob);
+
+              const script = document.createElement('script');
+              script.id = id;
+              script.src = blobUrl;
+              script.onload = () => {
+                URL.revokeObjectURL(blobUrl);
+                resolve();
+              };
+              script.onerror = () => {
+                URL.revokeObjectURL(blobUrl);
+                reject(new Error(`Failed loading ${id}`));
+              };
+
+              document.head.appendChild(script);
+            });
+          }
+
+          window.__PATPLACER_RESOURCES__ = window.__PATPLACER_RESOURCES__ || {};
+          window.__PATPLACER_RESOURCES__.iconsBaseUrl = assets.iconsBaseUrl || 'icons/';
+
+          if (assets.tool === 'patplacer' && window.PatPlacer?.togglePanel) {
+            window.PatPlacer.togglePanel();
+            return;
+          }
+          if (assets.tool === 'extractor' && window.PatPlacerExtractor?.togglePanel) {
+            window.PatPlacerExtractor.togglePanel();
+            return;
+          }
+          if (assets.tool === 'repair' && window.PatPlacerRepair?.togglePanel) {
+            window.PatPlacerRepair.togglePanel();
+            return;
+          }
+
+          injectCss(assets.cssText || '');
+
+          for (const item of assets.scriptsWithCode || []) {
+            await loadScriptBlob(item.code, item.id);
+          }
+        }
+      });
+
+      sendResponse({ success: true });
+    } catch (err) {
+      sendResponse({ success: false, error: err?.message || String(err) });
     }
-    
-    const code = await response.text();
-    
-    // Get URLs for resources that the injected script needs
-    const pixelFrameUrl = chrome.runtime.getURL('pixelframe.png');
-    const iconsBaseUrl = chrome.runtime.getURL('icons/');
-    
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      world: 'MAIN', // Run in page context to access page variables
-      func: injectScript,
-      args: [code, scriptName, pixelFrameUrl, iconsBaseUrl]
-    });
-    
-    console.log(`[PatPlacer] Injected script: ${scriptName}`);
-  } catch (error) {
-    console.error(`[PatPlacer] Failed to inject script: ${scriptName}`, error);
-    throw error;
-  }
-}
+  })();
 
-/**
- * Function that runs in page context to inject the script
- */
-function injectScript(code, scriptName, pixelFrameUrl, iconsBaseUrl) {
-  try {
-    // Set up resource URLs before the script runs
-    window.__PATPLACER_RESOURCES__ = {
-      pixelFrameUrl: pixelFrameUrl,
-      iconsBaseUrl: iconsBaseUrl
-    };
-    
-    const script = document.createElement('script');
-    script.textContent = code;
-    script.setAttribute('data-patplacer-script', scriptName);
-    document.head.appendChild(script);
-    // Don't remove immediately - some scripts need to stay
-    console.log(`[PatPlacer] Script loaded: ${scriptName}`);
-  } catch (error) {
-    console.error(`[PatPlacer] Error injecting script: ${scriptName}`, error);
-  }
-}
-
-/**
- * Inject CSS file into the page
- */
-async function injectCSS(tabId, cssName) {
-  try {
-    await chrome.scripting.insertCSS({
-      target: { tabId },
-      files: [`styles/${cssName}`]
-    });
-    console.log(`[PatPlacer] Injected CSS: ${cssName}`);
-  } catch (error) {
-    console.error(`[PatPlacer] Failed to inject CSS: ${cssName}`, error);
-    throw error;
-  }
-}
-
-// Log when service worker starts
-console.log('[PatPlacer] Background service worker started');
+  return true;
+});
