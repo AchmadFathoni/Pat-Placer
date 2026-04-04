@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PatPlacer OpenSource</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --muted: #94a3b8;
+      --text: #e2e8f0;
+      --accent: #22c55e;
+      --accent-2: #3b82f6;
+      --border: #1f2937;
+    }
+    body {
+      margin: 0;
+      padding: 14px;
+      width: 300px;
+      color: var(--text);
+      background: radial-gradient(circle at top right, #1d4ed8 0%, var(--bg) 52%);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+    .card {
+      border: 1px solid var(--border);
+      background: color-mix(in oklab, var(--panel) 86%, black 14%);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+    p {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      height: 34px;
+      cursor: pointer;
+      color: white;
+      font-weight: 600;
+      font-size: 12px;
+    }
+    #load-btn { background: linear-gradient(135deg, var(--accent-2), #2563eb); }
+    #toggle-btn { background: linear-gradient(135deg, #16a34a, var(--accent)); }
+    #status {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--muted);
+      background: #0b1220;
+      min-height: 34px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>PatPlacer OpenSource</h1>
+    <p>No online activation. Open wplace.live then load the tool.</p>
+
+    <div class="actions">
+      <button id="load-btn" type="button">Load Tool</button>
+      <button id="toggle-btn" type="button">Toggle Panel</button>
+    </div>
+
+    <div id="status">Ready.</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
