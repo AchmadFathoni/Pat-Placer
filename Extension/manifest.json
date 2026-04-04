@@ -1,30 +1,46 @@
-{
+﻿{
   "manifest_version": 3,
-  "name": "PatPlacer - WPlace Pixel Placer",
+  "name": "PatPlacer OpenSource",
   "version": "1.0.0",
-  "description": "Place pixel drafts on WPlace at exact tile/pixel coordinates",
+  "description": "Standalone PatPlacer extension for wplace.live (no online activation).",
   "permissions": [
-    "scripting",
     "storage",
-    "activeTab"
+    "cookies",
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "https://wplace.live/*",
-    "https://*.wplace.live/*"
-  ],
-  "action": {
-    "default_popup": "popup/popup.html",
-    "default_title": "PatPlacer"
-  },
-  "content_scripts": [
-    {
-      "matches": ["https://wplace.live/*"],
-      "js": ["content-script.js"],
-      "run_at": "document_end"
-    }
+    "https://*.wplace.live/*",
+    "https://backend.wplace.live/*"
   ],
   "background": {
     "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "PatPlacer OpenSource",
+    "default_icon": {
+      "16": "icons/anchor.png",
+      "48": "icons/anchor.png",
+      "128": "icons/anchor.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://wplace.live/*",
+        "https://*.wplace.live/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/anchor.png",
+    "48": "icons/anchor.png",
+    "128": "icons/anchor.png"
   },
   "web_accessible_resources": [
     {
@@ -33,7 +49,7 @@
         "styles/*.css",
         "icons/*"
       ],
-      "matches": ["https://wplace.live/*"]
+      "matches": ["<all_urls>"]
     }
   ]
 }
