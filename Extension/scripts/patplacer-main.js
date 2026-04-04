@@ -1800,6 +1800,13 @@
           <button class="pp-btn pp-btn-primary" id="patplacer-place-btn" disabled>
             <img src="${iconBase}games.png" class="pp-btn-icon" alt=""> <span id="patplacer-btn-text">Place Batch</span>
           </button>
+
+          <div id="patplacer-progress" style="display: none; margin-top: 10px; width: 100%;">
+            <div style="background: rgba(0,0,0,0.2); border-radius: 8px; height: 18px; overflow: hidden; position: relative; border: 1px solid rgba(255,255,255,0.1);">
+              <div id="patplacer-progress-fill" style="background: linear-gradient(90deg, #4caf50, #81c784); height: 100%; width: 0%; transition: width 0.1s linear;"></div>
+              <div id="patplacer-progress-text" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; text-align: center; color: white; font-size: 11px; font-weight: bold; line-height: 18px; text-shadow: 1px 1px 1px rgba(0,0,0,0.8); pointer-events: none;">Drafting: 0 / 0</div>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -4150,6 +4157,9 @@
         // Actually place this pixel
         placeDraft(pixel);
         state.placedPixels.push(pixel);
+        
+        // 60ms interval between each pixel placement
+        await sleep(60);
       }
 
       processedCount++;
@@ -4167,11 +4177,6 @@
         } else {
           progressTextEl.textContent = `Drafting: ${placedSoFar} / ${placedCount}`;
         }
-      }
-
-      // Small delay to not overwhelm the browser
-      if (processedCount % 100 === 0) {
-        await sleep(10);
       }
     }
 
