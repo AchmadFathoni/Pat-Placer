@@ -3,10 +3,15 @@
   "name": "PatPlacer OpenSource",
   "version": "1.0.0",
   "description": "Standalone PatPlacer extension for wplace.live (no online activation).",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "patplacer@wplace-live",
+      "strict_min_version": "128.0"
+    }
+  },
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "cookies",
     "activeTab",
     "scripting"
   ],
