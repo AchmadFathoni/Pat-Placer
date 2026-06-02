@@ -1295,7 +1295,7 @@
   // ============================================================
   const IDB = (() => {
     const DB_NAME = 'PatPlacerDB';
-    const DB_VERSION = 1;
+    const DB_VERSION = 2;
     const STORE_NAME = 'projects';
     const AUTOSAVE_KEY = 'autosave';
 
@@ -1307,9 +1307,11 @@
         const req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = (e) => {
           const db = e.target.result;
-          if (!db.objectStoreNames.contains(STORE_NAME)) {
-            db.createObjectStore(STORE_NAME);
+          // Drop any pre-existing store (v1 may have in-line keys that break put())
+          if (db.objectStoreNames.contains(STORE_NAME)) {
+            db.deleteObjectStore(STORE_NAME);
           }
+          db.createObjectStore(STORE_NAME);
         };
         req.onsuccess = (e) => {
           resolve(e.target.result);
@@ -1503,6 +1505,9 @@
 
       // Restore progress
       state.currentBatchIndex = data.progress?.placedCount || 0;
+      if (state.currentBatchIndex === 0 && state.allPixels.length > 0) {
+        updateStatus('Autosave loaded — 0 progress. Clear cache if this is stale.');
+      }
 
       // Re-calculate placed pixels for overlay
       state.placedPixels = state.allPixels.slice(0, state.currentBatchIndex);
@@ -1634,7 +1639,7 @@
       try {
         const data = this.serializeState('Autosave');
         await IDB.save(IDB.AUTOSAVE_KEY, data);
-        console.log('[PatPlacer] Auto-saved to IndexedDB');
+        console.log(`[PatPlacer] Auto-saved to IndexedDB: ${data.pixels.length} pixels, placedCount=${data.progress.placedCount}`);
       } catch (e) {
         console.warn('[PatPlacer] Auto-save failed:', e);
         // Try localStorage as fallback for small projects
@@ -1655,8 +1660,10 @@
         // Try IndexedDB first
         const data = await IDB.load(IDB.AUTOSAVE_KEY);
         if (data) {
+          console.log(`[PatPlacer] IndexedDB autosave found: ${data.pixels?.length || 0} pixels, placedCount=${data.progress?.placedCount ?? '(missing)'}`);
           try {
             await this.deserializeState(data);
+            updateStatus(`Autosave restored — ${state.allPixels.length} pixels, ${state.currentBatchIndex} placed`);
             // Migrate old localStorage data out of the way
             if (localStorage.getItem('patplacer_autosave')) {
               localStorage.removeItem('patplacer_autosave');
@@ -4376,7 +4383,16 @@
     console.log(`[PatPlacer] Batch drafted. ${placedCount} drafts placed, ${skippedCount} skipped. Awaiting user confirmation.`);
     debugDraftMap();
 
-    // NOTE: Don't auto-save here - save after user confirms
+    // Advance progress immediately and save (wplace Paint uses opaque API)
+    if (totalInBatch > 0) {
+      state.currentBatchIndex += totalInBatch;
+      state.pendingBatchCount = 0;       // already advanced, prevent double-counting
+      state.pendingSkippedCount = 0;
+      updateBatchUI();
+      await PatPlacerStorage.saveToLocal();
+      console.log(`[PatPlacer] Progress saved: ${state.currentBatchIndex}/${state.allPixels.length}`);
+    }
+    // NOTE: pendingBatchCount left at 0 so confirmation handler only does cleanup
 
     state.isPlacing = false;
     if (progressEl) progressEl.style.display = 'none';
@@ -4590,6 +4606,62 @@
   let originalFetch = null;
   let fetchInterceptorInstalled = false;
 
+  // Shared paint-confirmation handler (used by both fetch and XHR interceptors)
+  async function handlePaintConfirmation() {
+    if (!state.draftOverlayEnabled) return;
+    console.log('[PatPlacer] Drafts confirmed - disabling draft overlay');
+    state.draftOverlayEnabled = false;
+
+    // Update progress NOW that user has confirmed
+    if (state.pendingBatchCount > 0) {
+      state.currentBatchIndex += state.pendingBatchCount;
+
+      // Update info panel progress (overall) - this is the real progress
+      const overallPercent = (state.currentBatchIndex / state.allPixels.length) * 100;
+      const infoFill = document.getElementById('patplacer-info-progress-fill');
+      const infoPlaced = document.getElementById('patplacer-info-placed');
+      if (infoFill) infoFill.style.width = `${overallPercent}%`;
+      if (infoPlaced) infoPlaced.textContent = state.currentBatchIndex.toLocaleString();
+
+      const confirmedCount = state.placedPixels.length;
+      const skippedCount = state.pendingSkippedCount;
+      const skipMsg = skippedCount > 0 ? ` (${skippedCount} skipped)` : '';
+      console.log(`[PatPlacer] Confirmed ${confirmedCount} pixels${skipMsg}. Total progress: ${state.currentBatchIndex}/${state.allPixels.length}`);
+
+      // Reset pending counts
+      state.pendingBatchCount = 0;
+      state.pendingSkippedCount = 0;
+
+      // Update batch UI to reflect new progress
+      updateBatchUI();
+
+      // Re-enable button if there are more pixels to place
+      const btn = document.getElementById('patplacer-batch-btn');
+      const remaining = state.allPixels.length - state.currentBatchIndex;
+      if (btn && remaining > 0) {
+        btn.disabled = false;
+      } else if (btn && remaining <= 0) {
+        // Mark as complete
+        const btnTextEl = document.getElementById('patplacer-btn-text');
+        if (btnTextEl) btnTextEl.textContent = '✓ Complete!';
+        btn.disabled = true;
+      }
+
+      // Auto-save progress after confirmation
+      await PatPlacerStorage.saveToLocal();
+    }
+
+    state.placedPixels = [];
+    state.chunkedTiles.clear();
+    setTimeout(triggerMapRefresh, 500);
+    // Auto-refresh charges after paint completes
+    setTimeout(() => {
+      console.log('[PatPlacer] Auto-refreshing charges after paint');
+      fetchCharges();
+    }, 1000);
+    updateStatus('Drafts confirmed! Progress updated. Refreshing charges...');
+  }
+
   // PERFORMANCE: Cache for composited tiles (original + overlay combined)
   // Key: "tileX,tileY", Value: Blob
   const compositedTileCache = new Map();
@@ -4625,57 +4697,7 @@
 
             // User confirmed drafts - disable draft overlay and clear placed pixels
             if (state.draftOverlayEnabled) {
-              console.log('[PatPlacer] Drafts confirmed - disabling draft overlay');
-              state.draftOverlayEnabled = false;
-
-              // Update progress NOW that user has confirmed
-              if (state.pendingBatchCount > 0) {
-                state.currentBatchIndex += state.pendingBatchCount;
-
-                // Update info panel progress (overall) - this is the real progress
-                const overallPercent = (state.currentBatchIndex / state.allPixels.length) * 100;
-                const infoFill = document.getElementById('patplacer-info-progress-fill');
-                const infoPlaced = document.getElementById('patplacer-info-placed');
-                if (infoFill) infoFill.style.width = `${overallPercent}%`;
-                if (infoPlaced) infoPlaced.textContent = state.currentBatchIndex.toLocaleString();
-
-                const confirmedCount = state.placedPixels.length;
-                const skippedCount = state.pendingSkippedCount;
-                const skipMsg = skippedCount > 0 ? ` (${skippedCount} skipped)` : '';
-                console.log(`[PatPlacer] Confirmed ${confirmedCount} pixels${skipMsg}. Total progress: ${state.currentBatchIndex}/${state.allPixels.length}`);
-
-                // Reset pending counts
-                state.pendingBatchCount = 0;
-                state.pendingSkippedCount = 0;
-
-                // Update batch UI to reflect new progress
-                updateBatchUI();
-
-                // Re-enable button if there are more pixels to place
-                const btn = document.getElementById('patplacer-batch-btn');
-                const remaining = state.allPixels.length - state.currentBatchIndex;
-                if (btn && remaining > 0) {
-                  btn.disabled = false;
-                } else if (btn && remaining <= 0) {
-                  // Mark as complete
-                  const btnTextEl = document.getElementById('patplacer-btn-text');
-                  if (btnTextEl) btnTextEl.textContent = '✓ Complete!';
-                  btn.disabled = true;
-                }
-
-                // Auto-save progress after confirmation
-                await PatPlacerStorage.saveToLocal();
-              }
-
-              state.placedPixels = [];
-              state.chunkedTiles.clear();
-              setTimeout(triggerMapRefresh, 500);
-              // Auto-refresh charges after paint completes
-              setTimeout(() => {
-                console.log('[PatPlacer] Auto-refreshing charges after paint');
-                fetchCharges();
-              }, 1000);
-              updateStatus('Drafts confirmed! Progress updated. Refreshing charges...');
+              await handlePaintConfirmation();
             }
           }
         } catch (e) {
@@ -4773,7 +4795,27 @@
       return response;
     };
 
-    console.log('[PatPlacer] Fetch interceptor installed for overlay');
+    // Also intercept XMLHttpRequest (wplace may use XHR instead of fetch for /pixel/)
+    const OrigXHROpen = XMLHttpRequest.prototype.open;
+    const OrigXHRSend = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function (method, url) {
+      this.__patplacer_url = typeof url === 'string' ? url : url.toString();
+      this.__patplacer_method = method.toUpperCase();
+      return OrigXHROpen.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function () {
+      if (this.__patplacer_method === 'POST' && this.__patplacer_url.includes('/pixel/')) {
+        console.log('[PatPlacer] XHR PAINT REQUEST:', this.__patplacer_url);
+        if (state.draftOverlayEnabled) {
+          handlePaintConfirmation();
+        }
+      }
+      return OrigXHRSend.apply(this, arguments);
+    };
+
+    console.log('[PatPlacer] Fetch and XHR interceptors installed');
   }
 
   /**
