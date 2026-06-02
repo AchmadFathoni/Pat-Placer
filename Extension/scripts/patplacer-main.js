@@ -1267,6 +1267,86 @@
   }
 
   // ============================================================
+  // INDEXEDDB HELPERS — used for large-project autosave (unlimited quota)
+  // ============================================================
+  const IDB = (() => {
+    const DB_NAME = 'PatPlacerDB';
+    const DB_VERSION = 1;
+    const STORE_NAME = 'projects';
+    const AUTOSAVE_KEY = 'autosave';
+
+    let dbPromise = null;
+
+    function open() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+          }
+        };
+        req.onsuccess = (e) => {
+          resolve(e.target.result);
+        };
+        req.onerror = (e) => {
+          console.error('[PatPlacer] IndexedDB open failed:', e.target.error);
+          reject(e.target.error);
+        };
+        req.onblocked = () => {
+          console.warn('[PatPlacer] IndexedDB open blocked — close other tabs');
+          reject(new Error('IndexedDB blocked'));
+        };
+      });
+      return dbPromise;
+    }
+
+    async function save(key, value) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.oncomplete = () => resolve();
+        tx.onerror = (e) => reject(e.target.error);
+        tx.onabort = () => reject(new Error('Transaction aborted'));
+        tx.objectStore(STORE_NAME).put(value, key);
+      });
+    }
+
+    async function load(key) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = (e) => reject(e.target.error);
+      });
+    }
+
+    async function remove(key) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = (e) => reject(e.target.error);
+      });
+    }
+
+    async function has(key) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).getKey(key);
+        req.onsuccess = () => resolve(req.result !== undefined);
+        req.onerror = (e) => reject(e.target.error);
+      });
+    }
+
+    return { open, save, load, remove, has, AUTOSAVE_KEY };
+  })();
+
+  // ============================================================
   // STORAGE & EXPORT
   // ============================================================
   const PatPlacerStorage = {
@@ -1519,42 +1599,87 @@
       if (uploadLoaded) uploadLoaded.style.display = 'block';
     },
 
-    // Save to local storage
+    // Save to IndexedDB (unlimited quota, survives large projects)
     async saveToLocal() {
       try {
         const data = this.serializeState('Autosave');
-        localStorage.setItem('patplacer_autosave', JSON.stringify(data));
-        console.log('[PatPlacer] Auto-saved to localStorage');
+        await IDB.save(IDB.AUTOSAVE_KEY, data);
+        console.log('[PatPlacer] Auto-saved to IndexedDB');
       } catch (e) {
-        console.warn('[PatPlacer] Auto-save failed', e);
+        console.warn('[PatPlacer] Auto-save failed:', e);
+        // Try localStorage as fallback for small projects
+        try {
+          const data = this.serializeState('Autosave');
+          localStorage.setItem('patplacer_autosave', JSON.stringify(data));
+          console.log('[PatPlacer] Fallback: saved to localStorage');
+        } catch (fallbackErr) {
+          console.warn('[PatPlacer] Fallback save also failed:', fallbackErr);
+          updateStatus('Auto-save failed — project may be too large. Export manually.');
+        }
       }
     },
 
-    // Load from local storage
+    // Load autosave — prefer IndexedDB, fall back to localStorage
     async loadFromLocal() {
+      try {
+        // Try IndexedDB first
+        const data = await IDB.load(IDB.AUTOSAVE_KEY);
+        if (data) {
+          await this.deserializeState(data);
+          // Migrate old localStorage data out of the way
+          if (localStorage.getItem('patplacer_autosave')) {
+            localStorage.removeItem('patplacer_autosave');
+          }
+          return true;
+        }
+      } catch (e) {
+        console.warn('[PatPlacer] IndexedDB load failed, trying localStorage:', e);
+      }
+
+      // Fallback: try legacy localStorage
       try {
         const json = localStorage.getItem('patplacer_autosave');
         if (json) {
           const data = JSON.parse(json);
           await this.deserializeState(data);
+          // Migrate to IndexedDB for next time
+          try {
+            await IDB.save(IDB.AUTOSAVE_KEY, data);
+            localStorage.removeItem('patplacer_autosave');
+            console.log('[PatPlacer] Migrated autosave from localStorage to IndexedDB');
+          } catch (migErr) {
+            console.warn('[PatPlacer] Migration to IndexedDB failed:', migErr);
+          }
           return true;
         }
       } catch (e) {
-        console.error('[PatPlacer] Load failed:', e);
-        updateStatus('Failed to load autosave - clearing corrupted data');
-        localStorage.removeItem('patplacer_autosave'); // Clear bad data
+        console.error('[PatPlacer] localStorage load failed:', e);
+        updateStatus('Failed to load autosave — clearing corrupted data');
+        localStorage.removeItem('patplacer_autosave');
       }
       return false;
     },
 
-    // Check if autosave exists
+    // Check if autosave exists (async — check IndexedDB then localStorage)
+    // NOTE: callers use this synchronously at init; the restore-row is shown
+    // if either store has data. We check IndexedDB asynchronously below too.
     hasAutosave() {
       return !!localStorage.getItem('patplacer_autosave');
     },
 
-    // Clear autosave
-    clearAutosave() {
-      localStorage.removeItem('patplacer_autosave');
+    // Check IndexedDB as well (called from init)
+    async checkIdbAutosave() {
+      try {
+        return await IDB.has(IDB.AUTOSAVE_KEY);
+      } catch (e) {
+        return false;
+      }
+    },
+
+    // Clear autosave from both stores
+    async clearAutosave() {
+      try { await IDB.remove(IDB.AUTOSAVE_KEY); } catch (e) { /* ignore */ }
+      try { localStorage.removeItem('patplacer_autosave'); } catch (e) { /* ignore */ }
       updateStatus('Autosave cleared');
       const btn = document.getElementById('patplacer-restore-btn');
       if (btn) btn.style.display = 'none';
@@ -1831,8 +1956,8 @@
         panel.querySelector('#patplacer-autosave-row').style.display = 'none';
       }
     });
-    panel.querySelector('#patplacer-clear-save-btn').addEventListener('click', () => {
-      PatPlacerStorage.clearAutosave();
+    panel.querySelector('#patplacer-clear-save-btn').addEventListener('click', async () => {
+      await PatPlacerStorage.clearAutosave();
       panel.querySelector('#patplacer-autosave-row').style.display = 'none';
     });
 
@@ -6210,12 +6335,22 @@
     // Fetch charges on startup
     await fetchCharges();
 
-    // Check for autosave
+    // Check for autosave (localStorage + IndexedDB)
     if (PatPlacerStorage.hasAutosave()) {
       const autosaveRow = document.getElementById('patplacer-autosave-row');
       if (autosaveRow) {
         autosaveRow.style.display = 'block';
       }
+    } else {
+      // Also check IndexedDB (async) — local-only check missed IDB data
+      PatPlacerStorage.checkIdbAutosave().then((idbHas) => {
+        if (idbHas) {
+          const autosaveRow = document.getElementById('patplacer-autosave-row');
+          if (autosaveRow) {
+            autosaveRow.style.display = 'block';
+          }
+        }
+      });
     }
 
     console.log('[PatPlacer] Initialized successfully');

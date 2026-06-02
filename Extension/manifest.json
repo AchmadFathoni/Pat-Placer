@@ -5,6 +5,7 @@
   "description": "Standalone PatPlacer extension for wplace.live (no online activation).",
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "cookies",
     "activeTab",
     "scripting"
