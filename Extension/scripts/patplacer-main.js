@@ -4688,8 +4688,9 @@
             const anchorMarker = getAnchorMarkerForTile(tileKey);
 
             if (overlayActive || anchorMarker) {
-              // PERFORMANCE: Check cache first
-              const cacheKey = `${tileKey}_${state.overlayMode}_${anchorMarker ? 'anchor' : 'noanchor'}`;
+              // PERFORMANCE: Check cache first (key includes opacity to avoid stale overlays)
+              const opacity = state.overlayMode === 'draft' ? state.draftOverlayOpacity : state.templateOverlayOpacity;
+              const cacheKey = `${tileKey}_${state.overlayMode}_${opacity}_${anchorMarker ? 'anchor' : 'noanchor'}`;
               if (compositedTileCache.has(cacheKey)) {
                 return new Response(compositedTileCache.get(cacheKey), {
                   headers: response.headers,
@@ -4705,7 +4706,6 @@
                 if (overlayActive) {
                   const chunkBitmap = state.chunkedTiles.get(tileKey);
                   if (chunkBitmap) {
-                    const opacity = state.overlayMode === 'draft' ? state.draftOverlayOpacity : state.templateOverlayOpacity;
                     currentBlob = await compositeTile(currentBlob, chunkBitmap, opacity);
                   }
                 }
