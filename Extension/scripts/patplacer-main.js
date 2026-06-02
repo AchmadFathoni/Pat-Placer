@@ -353,7 +353,9 @@
 
     // Original tile data cache for skip-correct-pixels feature
     // Key: "tileX,tileY", Value: ImageData object
+    // FIFO eviction queue prevents unbounded memory growth
     originalTilesData: new Map(),
+    originalTilesQueue: [],
 
     // PERFORMANCE: Pre-grouped pixels by tile for O(1) lookup
     // Key: "tileX,tileY", Value: Array of {x, y, r, g, b, colorIdx}
@@ -4670,6 +4672,12 @@
               ctx.drawImage(bitmap, 0, 0);
               const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
               state.originalTilesData.set(tileKey, imageData);
+              state.originalTilesQueue.push(tileKey);
+              // Evict oldest tiles when cache exceeds 50 entries (~200 MB)
+              while (state.originalTilesQueue.length > 50) {
+                const oldest = state.originalTilesQueue.shift();
+                state.originalTilesData.delete(oldest);
+              }
               bitmap.close();
             } catch (e) {
               console.warn('[PatPlacer] Error caching tile data:', tileKey, e);
