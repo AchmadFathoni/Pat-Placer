@@ -775,13 +775,34 @@
     } : null;
   }
 
+  // ============================================================
+  // COLOR LOOKUP MAP — O(1) exact-match cache for performance
+  // ============================================================
+  let _colorLookupMap = null;
+
+  function buildColorLookup() {
+    const map = new Map();
+    for (const color of CONFIG.COLOR_PALETTE) {
+      if (state.disabledColors.has(color.id)) continue;
+      const key = (color.r << 16) | (color.g << 8) | color.b;
+      map.set(key, color);
+    }
+    _colorLookupMap = map;
+    return map;
+  }
+
+  function getColorLookup() {
+    if (!_colorLookupMap) return buildColorLookup();
+    return _colorLookupMap;
+  }
+
+  function invalidateColorLookup() {
+    _colorLookupMap = null;
+  }
+
   function colorDistance(r1, g1, b1, r2, g2, b2) {
-    // Simple Euclidean distance
-    return Math.sqrt(
-      Math.pow(r1 - r2, 2) +
-      Math.pow(g1 - g2, 2) +
-      Math.pow(b1 - b2, 2)
-    );
+    // Simple Euclidean distance (squared — sqrt unnecessary for comparison)
+    return (r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2;
   }
 
   function findClosestColor(r, g, b) {
@@ -861,10 +882,12 @@
   function toggleColorInComposition(colorId, swatchEl) {
     if (state.disabledColors.has(colorId)) {
       state.disabledColors.delete(colorId);
+      invalidateColorLookup();
       swatchEl.classList.remove('disabled');
       swatchEl.classList.add('enabled');
     } else {
       state.disabledColors.add(colorId);
+      invalidateColorLookup();
       swatchEl.classList.remove('enabled');
       swatchEl.classList.add('disabled');
     }
@@ -1214,14 +1237,13 @@
    * @returns {number | null} - Palette ID (1-63) or null if not found
    */
   function resolveColorToId(r, g, b) {
-    // First try exact match (faster)
-    for (const color of CONFIG.COLOR_PALETTE) {
-      if (color.r === r && color.g === g && color.b === b) {
-        return color.id;
-      }
-    }
+    // O(1) exact match via lookup map
+    const map = getColorLookup();
+    const key = (r << 16) | (g << 8) | b;
+    const color = map.get(key);
+    if (color) return color.id;
 
-    // Fall back to closest color
+    // Fall back to closest color (rare — only if color not in palette)
     const closest = findClosestColor(r, g, b);
     return closest ? closest.id : null;
   }
@@ -3368,6 +3390,7 @@
     if (enableAllBtn) {
       enableAllBtn.addEventListener('click', () => {
         state.disabledColors.clear();
+        invalidateColorLookup();
         // Update all swatches
         const swatches = panel.querySelectorAll('.pp-color-comp-swatch');
         swatches.forEach(s => {
@@ -3383,6 +3406,7 @@
       disableAllBtn.addEventListener('click', () => {
         // Disable all colors
         CONFIG.COLOR_PALETTE.forEach(c => state.disabledColors.add(c.id));
+        invalidateColorLookup();
         // Update all swatches
         const swatches = panel.querySelectorAll('.pp-color-comp-swatch');
         swatches.forEach(s => {
@@ -3890,13 +3914,11 @@
    * Find exact color match first, then fall back to closest
    */
   function findExactOrClosestColor(r, g, b) {
-    // First try exact match (only from enabled colors)
-    for (const color of CONFIG.COLOR_PALETTE) {
-      if (state.disabledColors.has(color.id)) continue;
-      if (color.r === r && color.g === g && color.b === b) {
-        return color;
-      }
-    }
+    // O(1) exact match via lookup map
+    const map = getColorLookup();
+    const key = (r << 16) | (g << 8) | b;
+    const color = map.get(key);
+    if (color) return color;
     // Fall back to closest (already filters disabled colors)
     return findClosestColor(r, g, b);
   }
@@ -4125,6 +4147,7 @@
             console.log(`[PatPlacer] Remapped ${remappedCount} pixel colorIdx values after palette correction`);
           }
         }
+        invalidateColorLookup();
       }
 
       // Update UI
