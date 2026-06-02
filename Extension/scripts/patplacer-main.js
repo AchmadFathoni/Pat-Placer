@@ -4623,7 +4623,7 @@
                 }
 
                 // Auto-save progress after confirmation
-                PatPlacerStorage.saveToLocal();
+                await PatPlacerStorage.saveToLocal();
               }
 
               state.placedPixels = [];
