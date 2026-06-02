@@ -4068,6 +4068,9 @@
         const realColor = value.color;
         console.log(`[PatPlacer] Learning color mapping: colorIdx=${realIdx} -> RGB(${realColor.r}, ${realColor.g}, ${realColor.b}) = ${rgbToHex(realColor.r, realColor.g, realColor.b)}`);
 
+        // Track old-to-new ID mappings for remapping pixels
+        const idRemap = new Map();
+
         // UPDATE our palette to match wplace's REAL colorIdx
         // Find if we have a color with similar RGB and fix its ID
         const existingIdx = CONFIG.COLOR_PALETTE.findIndex(c =>
@@ -4078,6 +4081,7 @@
           const oldId = CONFIG.COLOR_PALETTE[existingIdx].id;
           if (oldId !== realIdx) {
             console.log(`[PatPlacer] FIXING palette: RGB(${realColor.r},${realColor.g},${realColor.b}) was idx ${oldId}, should be ${realIdx}`);
+            idRemap.set(oldId, realIdx);
             CONFIG.COLOR_PALETTE[existingIdx].id = realIdx;
           }
         } else {
@@ -4090,6 +4094,21 @@
             b: realColor.b,
             hex: rgbToHex(realColor.r, realColor.g, realColor.b)
           });
+        }
+
+        // Remap all pixel colorIdx values to match the corrected palette
+        if (idRemap.size > 0 && state.allPixels.length > 0) {
+          let remappedCount = 0;
+          for (const pixel of state.allPixels) {
+            const newId = idRemap.get(pixel.colorIdx);
+            if (newId !== undefined) {
+              pixel.colorIdx = newId;
+              remappedCount++;
+            }
+          }
+          if (remappedCount > 0) {
+            console.log(`[PatPlacer] Remapped ${remappedCount} pixel colorIdx values after palette correction`);
+          }
         }
       }
 
