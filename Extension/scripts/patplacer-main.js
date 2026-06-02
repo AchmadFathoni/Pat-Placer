@@ -1603,6 +1603,12 @@
 
     // Save to IndexedDB (unlimited quota, survives large projects)
     async saveToLocal() {
+      // Guard: don't save if there's nothing to persist (empty pixel list
+      // produces a corrupt entry that deserializeState rejects permanently)
+      if (!state.allPixels || state.allPixels.length === 0) {
+        console.log('[PatPlacer] Auto-save skipped — no pixels to save');
+        return;
+      }
       try {
         const data = this.serializeState('Autosave');
         await IDB.save(IDB.AUTOSAVE_KEY, data);
@@ -1627,15 +1633,22 @@
         // Try IndexedDB first
         const data = await IDB.load(IDB.AUTOSAVE_KEY);
         if (data) {
-          await this.deserializeState(data);
-          // Migrate old localStorage data out of the way
-          if (localStorage.getItem('patplacer_autosave')) {
-            localStorage.removeItem('patplacer_autosave');
+          try {
+            await this.deserializeState(data);
+            // Migrate old localStorage data out of the way
+            if (localStorage.getItem('patplacer_autosave')) {
+              localStorage.removeItem('patplacer_autosave');
+            }
+            return true;
+          } catch (deserErr) {
+            // Corrupted IndexedDB entry — delete it so retry falls through to localStorage
+            console.warn('[PatPlacer] IndexedDB entry corrupted, deleting:', deserErr.message);
+            updateStatus('Cached save corrupted — clearing and retrying...');
+            try { await IDB.remove(IDB.AUTOSAVE_KEY); } catch (e) { /* ignore */ }
           }
-          return true;
         }
       } catch (e) {
-        console.warn('[PatPlacer] IndexedDB load failed, trying localStorage:', e);
+        console.warn('[PatPlacer] IndexedDB read failed, trying localStorage:', e);
       }
 
       // Fallback: try legacy localStorage
