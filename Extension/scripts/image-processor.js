@@ -446,6 +446,19 @@
     }
 
     /**
+     * Get Oklab with caching
+     */
+    _getOklab(r, g, b) {
+      const key = (r << 16) | (g << 8) | b;
+      let v = this._oklabCache.get(key);
+      if (!v) {
+        v = this._rgbToOklab(r, g, b);
+        this._oklabCache.set(key, v);
+      }
+      return v;
+    }
+
+    /**
      * RGB to HSV
      */
     _rgbToHsv(r, g, b) {
@@ -717,8 +730,8 @@
 
       const { enableChromaPenalty = false, chromaPenaltyWeight = 0.15 } = options;
 
-      // Normalize palette format
-      const normPalette = palette.map(c => 
+      // Normalize palette format (once per call instead of per-branch-per-pixel)
+      const normPalette = palette.map(c =>
         Array.isArray(c) ? c : [c.r, c.g, c.b]
       );
 
@@ -751,12 +764,12 @@
         return best || [0, 0, 0];
       }
 
-      // OKLAB
+      // OKLAB — precompute palette values for O(n) instead of O(n × p)
       if (algorithm === 'oklab') {
-        const [lt, at, bt] = this._rgbToOklab(r, g, b);
+        const [lt, at, bt] = this._getOklab(r, g, b);
         let best = null, bestDist = Infinity;
         for (const [pr, pg, pb] of normPalette) {
-          const [lp, ap, bp] = this._rgbToOklab(pr, pg, pb);
+          const [lp, ap, bp] = this._getOklab(pr, pg, pb);
           const dist = (lt - lp) ** 2 + (at - ap) ** 2 + (bt - bp) ** 2;
           if (dist < bestDist) { bestDist = dist; best = [pr, pg, pb]; }
         }
