@@ -4307,10 +4307,13 @@
 
     let processedCount = 0;
 
+    // Build Set for O(1) skip-index lookup (avoids O(n²) freeze on large batches)
+    const skipSet = new Set(pixelsToSkip.map(s => s.index));
+
     // Process all pixels in order (both skip and place)
     for (let i = batchStart; i < scanIndex && state.isPlacing; i++) {
       const pixel = state.allPixels[i];
-      const isSkipped = pixelsToSkip.some(s => s.index === i);
+      const isSkipped = skipSet.has(i);
 
       if (!isSkipped) {
         // Actually place this pixel
