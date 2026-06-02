@@ -2046,7 +2046,7 @@
         // Hue rotation
         if (hue !== 0) {
           const [h, s, l] = this._rgbToHsl(r, g, b);
-          const newH = (h + hue) % 360;
+          const newH = ((h + hue) % 360 + 360) % 360;
           [r, g, b] = this._hslToRgb(newH, s, l);
         }
 
@@ -2163,6 +2163,8 @@
       const imageData = this.getPixelData();
       const result = this.applySimpleQuantization(imageData, this.canvas.width, this.canvas.height, palette, {
         algorithm: colorSpace,
+        enableChromaPenalty: options.enableChromaPenalty || false,
+        chromaPenaltyWeight: options.chromaPenaltyWeight || 0.15,
         paintTransparentPixels: options.paintTransparentPixels || false,
         paintWhitePixels: options.paintWhitePixels !== undefined ? options.paintWhitePixels : true,
         transparencyThreshold: options.transparencyThreshold || 128
@@ -2204,6 +2206,8 @@
         method: internalMethod,
         strength: strength,
         algorithm: colorSpace,
+        enableChromaPenalty: options.enableChromaPenalty || false,
+        chromaPenaltyWeight: options.chromaPenaltyWeight || 0.15,
         paintTransparentPixels: options.paintTransparentPixels || false,
         paintWhitePixels: options.paintWhitePixels !== undefined ? options.paintWhitePixels : true,
         transparencyThreshold: options.transparencyThreshold || 128
