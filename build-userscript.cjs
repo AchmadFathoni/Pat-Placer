@@ -1,97 +1,45 @@
 /**
- * Builds patplacer.user.js Tampermonkey userscript from Chrome Extension source.
+ * Builds patplacer.user.js Tampermonkey userscript from jsDelivr CDN.
  * Usage: node build-userscript.cjs
+ *
+ * Override defaults via env vars: OWNER, REPO, BRANCH
  */
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const ROOT = __dirname;
-const EXT = path.join(ROOT, 'Extension');
-const ICONS_DIR = path.join(EXT, 'icons');
-const SCRIPTS_DIR = path.join(EXT, 'scripts');
-const STYLES_DIR = path.join(EXT, 'styles');
 
-// ─── Icons to exclude (aesthetic floating decorations + unused) ────────────
-const EXCLUDE_ICONS = new Set([
-  'alien.png', 'alien-alt.png', 'axe.png', 'barrel.png', 'dragon.png',
-  'girl.png', 'gun.png', 'mappin.png', 'monster.png', 'night-sky.png',
-  'robot.png', 'triangle.png', 'wizard.png'
-]);
-
-// ─── Read and base64-encode icons (functional only) ───────────────────────
-const icons = {};
-const iconFiles = fs.readdirSync(ICONS_DIR).filter(f => f.endsWith('.png') && !EXCLUDE_ICONS.has(f));
-iconFiles.forEach(f => {
-  const data = fs.readFileSync(path.join(ICONS_DIR, f));
-  icons[f] = `data:image/png;base64,${data.toString('base64')}`;
-});
-console.log(`Encoded ${iconFiles.length} functional icons (${Object.keys(EXCLUDE_ICONS).filter(k => fs.existsSync(path.join(ICONS_DIR, k))).length} aesthetic/unused excluded)`);
-
-// ─── Read source files ─────────────────────────────────────────────────────
-const cssContent = fs.readFileSync(path.join(STYLES_DIR, 'patplacer.css'), 'utf-8');
-const imageProcessorCode = fs.readFileSync(path.join(SCRIPTS_DIR, 'image-processor.js'), 'utf-8');
-const patPlacerMainCode = fs.readFileSync(path.join(SCRIPTS_DIR, 'patplacer-main.js'), 'utf-8');
-const artExtractorCode = fs.readFileSync(path.join(SCRIPTS_DIR, 'art-extractor.js'), 'utf-8');
-const repairToolCode = fs.readFileSync(path.join(SCRIPTS_DIR, 'repair-tool.js'), 'utf-8');
-
-// ─── Transform JS: Replace icon references ─────────────────────────────────
-function transformIconRefs(code) {
-  // Neutralize iconBase/ICON_BASE variable declarations
-  code = code.replace(
-    /const\s+ICON_BASE\s*=\s*\([^)]*\)\s*\?\s*[^:]*\s*:\s*'[^']*';/g,
-    'const ICON_BASE = "";'
-  );
-  code = code.replace(
-    /const\s+iconBase\s*=\s*\([^)]*\)\s*\?\s*[^:]*\s*:\s*'[^']*';/g,
-    'const iconBase = "";'
-  );
-
-  // Neutralize ICON_BASE in CONFIG objects
-  code = code.replace(
-    /ICON_BASE:\s*\(window\.__PATPLACER_RESOURCES__\s*&&\s*window\.__PATPLACER_RESOURCES__\.iconsBaseUrl\)\s*\?\s*window\.__PATPLACER_RESOURCES__\.iconsBaseUrl\s*:\s*'icons\/'/g,
-    'ICON_BASE: ""'
-  );
-
-  // Replace ${iconBase}name.png → ${__PP_ICON('name.png')}
-  code = code.replace(/\$\{iconBase\}([\w-]+)\.png/g, '${__PP_ICON(\'$1.png\')}');
-  code = code.replace(/\$\{ICON_BASE\}([\w-]+)\.png/g, '${__PP_ICON(\'$1.png\')}');
-  code = code.replace(/\$\{CONFIG\.ICON_BASE\}([\w-]+)\.png/g, '${__PP_ICON(\'$1.png\')}');
-
-  // Replace iconBase + 'name.png' pattern (string concat)
-  code = code.replace(/iconBase\s*\+\s*'([\w-]+)\.png'/g, '__PP_ICON(\'$1.png\')');
-  code = code.replace(/ICON_BASE\s*\+\s*'([\w-]+)\.png'/g, '__PP_ICON(\'$1.png\')');
-  code = code.replace(/CONFIG\.ICON_BASE\s*\+\s*'([\w-]+)\.png'/g, '__PP_ICON(\'$1.png\')');
-
-  return code;
+// ─── Auto-detect repo info from git ──────────────────────────────────────────
+function getGitInfo() {
+  try {
+    const remote = execSync('git remote get-url origin', { encoding: 'utf-8' }).trim();
+    const m = remote.match(/github\.com[/:]([\w-]+)\/([\w-]+?)(?:\.git)?$/);
+    const owner = m ? m[1] : 'Patricklumowa';
+    const repo = m ? m[2] : 'Pat-Placer';
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf-8' }).trim();
+    return { owner, repo, branch };
+  } catch {
+    return { owner: 'Patricklumowa', repo: 'Pat-Placer', branch: 'main' };
+  }
 }
 
-const processedPatplacerMain = transformIconRefs(patPlacerMainCode);
-const processedArtExtractor = transformIconRefs(artExtractorCode);
-const processedRepairTool = transformIconRefs(repairToolCode);
+const OWNER = process.env.OWNER || getGitInfo().owner;
+const REPO = process.env.REPO || getGitInfo().repo;
+const BRANCH = process.env.BRANCH || getGitInfo().branch;
+const BASE_URL = `https://cdn.jsdelivr.net/gh/${OWNER}/${REPO}@${BRANCH}/Extension`;
 
-// ─── Escape code for embedding as JavaScript string literal ─────────────────
-function jsStringEscape(code) {
-  return code
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r');
-}
+// ─── Scripts to inject ───────────────────────────────────────────────────────
+const SCRIPTS = [
+  { file: 'image-processor.js', id: 'patplacer-image-processor-script' },
+  { file: 'patplacer-main.js',   id: 'patplacer-main-script' },
+  { file: 'art-extractor.js',   id: 'patplacer-extractor-script' },
+  { file: 'repair-tool.js',     id: 'patplacer-repair-script' },
+];
 
-// ─── Generate inline icon map (base64 data URIs, no external resources) ────
-const iconMapObject = {};
-for (const name of iconFiles) {
-  iconMapObject[name] = icons[name];
-}
-const iconMapJson = JSON.stringify(iconMapObject);
-
-// With @grant none, we're in the page context — set window globals directly
-const iconInjectCode = `
-  window.__PATPLACER_ICONS__ = ${iconMapJson};
-  window.__PP_ICON = function(name) { return window.__PATPLACER_ICONS__ && window.__PATPLACER_ICONS__[name] || ""; };
-  window.__PATPLACER_RESOURCES__ = window.__PATPLACER_RESOURCES__ || {};
-  window.__PATPLACER_RESOURCES__.iconsBaseUrl = "";
-`;
+const injectCalls = SCRIPTS.map(s =>
+  `    injectScript(BASE + '/scripts/${s.file}', '${s.id}')`
+).join(',\n');
 
 // ─── Assemble the userscript ───────────────────────────────────────────────
 const userScript = `// ==UserScript==
@@ -108,36 +56,51 @@ const userScript = `// ==UserScript==
 
 (function() {
   'use strict';
-${iconInjectCode}
+
+  const BASE = '${BASE_URL}';
+
+  // Set up icon base URL — tool scripts check this at runtime
+  window.__PATPLACER_RESOURCES__ = window.__PATPLACER_RESOURCES__ || {};
+  window.__PATPLACER_RESOURCES__.iconsBaseUrl = BASE + '/icons/';
+
   // Inject CSS (manually, to avoid @grant which would trigger Firefox XrayWrapper sandbox)
-  (function() {
-    const s = document.createElement('style');
-    s.id = 'patplacer-styles';
-    s.textContent = '${jsStringEscape(cssContent)}';
-    document.head.appendChild(s);
+  (async function() {
+    try {
+      const resp = await fetch(BASE + '/styles/patplacer.css');
+      const css = await resp.text();
+      const s = document.createElement('style');
+      s.id = 'patplacer-styles';
+      s.textContent = css;
+      document.head.appendChild(s);
+    } catch (e) {
+      console.error('[PP] Failed to load styles:', e);
+    }
   })();
 
-  // Helper: inject script code into page context via Blob URL (CSP-safe on Firefox)
-  function injectScript(code, id) {
-    return new Promise((resolve) => {
-      if (document.getElementById(id)) { resolve(); return; }
+  // Helper: inject script into page context via Blob URL (CSP-safe on Firefox)
+  async function injectScript(url, id) {
+    if (document.getElementById(id)) return;
+    try {
+      const resp = await fetch(url);
+      const code = await resp.text();
       const blob = new Blob([code], { type: 'application/javascript' });
-      const url = URL.createObjectURL(blob);
+      const blobUrl = URL.createObjectURL(blob);
       const script = document.createElement('script');
       script.id = id;
-      script.src = url;
-      script.onload = () => { URL.revokeObjectURL(url); resolve(); };
-      script.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-      document.head.appendChild(script);
-    });
+      script.src = blobUrl;
+      return new Promise(resolve => {
+        script.onload = () => { URL.revokeObjectURL(blobUrl); resolve(); };
+        script.onerror = () => { URL.revokeObjectURL(blobUrl); console.error('[PP] Script load error:', url); resolve(); };
+        document.head.appendChild(script);
+      });
+    } catch (e) {
+      console.error('[PP] Failed to load script:', url, e);
+    }
   }
 
   // Inject all tool scripts into page context (async via Blob URLs)
   Promise.all([
-    injectScript('${jsStringEscape(imageProcessorCode)}', 'patplacer-image-processor-script'),
-    injectScript('${jsStringEscape(processedPatplacerMain)}', 'patplacer-main-script'),
-    injectScript('${jsStringEscape(processedArtExtractor)}', 'patplacer-extractor-script'),
-    injectScript('${jsStringEscape(processedRepairTool)}', 'patplacer-repair-script')
+${injectCalls}
   ]).then(() => {
 
   // ─── Button injection (from content.js) ────────────────────────────────
@@ -248,5 +211,6 @@ const outputPath = path.join(ROOT, 'patplacer.user.js');
 fs.writeFileSync(outputPath, userScript, 'utf-8');
 
 const kb = (Buffer.byteLength(userScript, 'utf-8') / 1024).toFixed(0);
-console.log('Written patplacer.user.js (' + kb + ' KB)');
+console.log(`Written patplacer.user.js (${kb} KB)`);
+console.log(`Base URL: ${BASE_URL}`);
 console.log('Done!');
