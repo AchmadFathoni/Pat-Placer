@@ -85,17 +85,12 @@ for (const name of iconFiles) {
 }
 const iconMapJson = JSON.stringify(iconMapObject);
 
-// Bypass GM sandbox: inject icons directly into page context
-// Uses JSON.stringify at runtime to avoid quoting conflicts in script.textContent
+// With @grant none, we're in the page context — set window globals directly
 const iconInjectCode = `
-  const iconData = ${iconMapJson};
-  const iconInjectScript = document.createElement('script');
-  iconInjectScript.id = 'patplacer-icons-inject';
-  iconInjectScript.textContent = 'window.__PATPLACER_ICONS__ = ' + JSON.stringify(iconData) + ';' +
-    'window.__PP_ICON = function(name) { return window.__PATPLACER_ICONS__ && window.__PATPLACER_ICONS__[name] || ""; };' +
-    'window.__PATPLACER_RESOURCES__ = window.__PATPLACER_RESOURCES__ || {};' +
-    'window.__PATPLACER_RESOURCES__.iconsBaseUrl = "";';
-  document.head.appendChild(iconInjectScript);
+  window.__PATPLACER_ICONS__ = ${iconMapJson};
+  window.__PP_ICON = function(name) { return window.__PATPLACER_ICONS__ && window.__PATPLACER_ICONS__[name] || ""; };
+  window.__PATPLACER_RESOURCES__ = window.__PATPLACER_RESOURCES__ || {};
+  window.__PATPLACER_RESOURCES__.iconsBaseUrl = "";
 `;
 
 // ─── Assemble the userscript ───────────────────────────────────────────────
@@ -108,29 +103,42 @@ const userScript = `// ==UserScript==
 // @match        https://wplace.live/*
 // @match        https://*.wplace.live/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=wplace.live
-// @grant        GM_addStyle
+// @grant        none
 // ==/UserScript==
 
 (function() {
   'use strict';
 ${iconInjectCode}
-  // Inject CSS
-  GM_addStyle('${jsStringEscape(cssContent)}');
+  // Inject CSS (manually, to avoid @grant which would trigger Firefox XrayWrapper sandbox)
+  (function() {
+    const s = document.createElement('style');
+    s.id = 'patplacer-styles';
+    s.textContent = '${jsStringEscape(cssContent)}';
+    document.head.appendChild(s);
+  })();
 
-  // Helper: inject script code into page context
+  // Helper: inject script code into page context via Blob URL (CSP-safe on Firefox)
   function injectScript(code, id) {
-    if (document.getElementById(id)) return;
-    const script = document.createElement('script');
-    script.id = id;
-    script.textContent = code;
-    document.head.appendChild(script);
+    return new Promise((resolve) => {
+      if (document.getElementById(id)) { resolve(); return; }
+      const blob = new Blob([code], { type: 'application/javascript' });
+      const url = URL.createObjectURL(blob);
+      const script = document.createElement('script');
+      script.id = id;
+      script.src = url;
+      script.onload = () => { URL.revokeObjectURL(url); resolve(); };
+      script.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+      document.head.appendChild(script);
+    });
   }
 
-  // Inject all tool scripts into page context
-  injectScript('${jsStringEscape(imageProcessorCode)}', 'patplacer-image-processor-script');
-  injectScript('${jsStringEscape(processedPatplacerMain)}', 'patplacer-main-script');
-  injectScript('${jsStringEscape(processedArtExtractor)}', 'patplacer-extractor-script');
-  injectScript('${jsStringEscape(processedRepairTool)}', 'patplacer-repair-script');
+  // Inject all tool scripts into page context (async via Blob URLs)
+  Promise.all([
+    injectScript('${jsStringEscape(imageProcessorCode)}', 'patplacer-image-processor-script'),
+    injectScript('${jsStringEscape(processedPatplacerMain)}', 'patplacer-main-script'),
+    injectScript('${jsStringEscape(processedArtExtractor)}', 'patplacer-extractor-script'),
+    injectScript('${jsStringEscape(processedRepairTool)}', 'patplacer-repair-script')
+  ]).then(() => {
 
   // ─── Button injection (from content.js) ────────────────────────────────
   if (!/(^|\\.)wplace\\.live\$/i.test(window.location.hostname)) return;
@@ -192,21 +200,13 @@ ${iconInjectCode}
   }
 
   function handleToolClick(tool) {
-    const before = {
-      patplacer: !!(window.PatPlacer && window.PatPlacer.togglePanel),
-      extractor: !!(window.PatPlacerExtractor && window.PatPlacerExtractor.togglePanel),
-      repair: !!(window.PatPlacerRepair && window.PatPlacerRepair.togglePanel)
-    };
-    if (typeof tool.toggle === 'function') tool.toggle();
-    setTimeout(() => {
-      const after = {
-        patplacer: !!(window.PatPlacer && window.PatPlacer.togglePanel),
-        extractor: !!(window.PatPlacerExtractor && window.PatPlacerExtractor.togglePanel),
-        repair: !!(window.PatPlacerRepair && window.PatPlacerRepair.togglePanel)
-      };
-      if (!before[tool.key] && after[tool.key]) setButtonState(tool, 'loaded');
-      else if (before[tool.key] && after[tool.key]) setButtonState(tool, 'loaded');
-    }, 300);
+    console.log('[PP] handleToolClick:', tool.key, 'toggle type:', typeof tool.toggle);
+    console.log('[PP] window.PatPlacer:', !!window.PatPlacer, 'window.PatPlacerExtractor:', !!window.PatPlacerExtractor, 'window.PatPlacerRepair:', !!window.PatPlacerRepair);
+    if (typeof tool.toggle === 'function') {
+      console.log('[PP] calling toggle for', tool.key);
+      tool.toggle();
+      console.log('[PP] toggle returned for', tool.key);
+    }
   }
 
   function createToolButtons() {
@@ -239,6 +239,7 @@ ${iconInjectCode}
   setTimeout(createToolButtons, 2000);
   observer.observe(document.body, { childList: true, subtree: true });
 
+  });
 })();
 `;
 

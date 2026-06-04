@@ -1211,9 +1211,14 @@
 
   function togglePanel() {
     const p = document.getElementById('patplacer-repair-panel');
+    console.log('[Repair] togglePanel called, panel found:', !!p, 'display:', p?.style?.display);
     if (p) {
-      p.style.display = (p.style.display === 'none') ? 'flex' : 'none';
+      const newDisplay = (p.style.display === 'none') ? 'flex' : 'none';
+      console.log('[Repair] togglePanel setting display to:', newDisplay);
+      p.style.display = newDisplay;
+      console.log('[Repair] togglePanel done, display now:', p.style.display);
     } else {
+      console.log('[Repair] togglePanel: panel not in DOM, calling makePanel()');
       makePanel();
     }
   }
@@ -1221,7 +1226,8 @@
   function init() {
     installTileFetchInterceptor();
     setupColorPickerObserver();
-    makePanel();
+    const panel = makePanel();
+    panel.style.display = 'none';
 
     window.PatPlacerRepair = {
       togglePanel

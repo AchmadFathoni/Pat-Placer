@@ -49,3 +49,10 @@ Extension/                 ← load this folder as unpacked extension in chrome:
 4. Assembles a single IIFE with the Tampermonkey metadata block, an inline icon-injection `<script>` tag, CSS via `GM_addStyle()`, all 4 tool scripts injected into MAIN world, and the button-injection logic (from `content.js`) with a `MutationObserver`.
 
 **Why no external resources:** Everything is inlined — CSS is escaped as a JS string literal, JS sources are embedded as script tags, icons are base64 data URIs, SVG button icons are inline strings. No network requests, no CDN, no `npm install`.
+
+## Firefox CSP & Tampermonkey sandbox (important — easy to break)
+
+- **`@grant none` is required on Firefox.** Any `@grant` (like `GM_addStyle`) activates Firefox's XrayWrapper sandbox, isolating the userscript's `window` from the page's `window`. Injected `<script>` tags set globals on the page's `window`, but the userscript reads from the sandbox's `window` — different objects. Always use `@grant none` and inject CSS manually via `document.createElement('style')`.
+- **No `<script>` injection via `textContent` on Firefox.** Firefox's CSP3 treats `'unsafe-inline'` as covering only scripts in the initial HTML, not dynamically created ones. Use `Blob` URLs instead: `script.src = URL.createObjectURL(new Blob([code], {type: 'application/javascript'}))`. The CSP includes `blob:` in `script-src`.
+- **Set `window` globals directly.** With `@grant none`, the userscript runs in the page context, so `window.__PATPLACER_ICONS__ = {...}` in the IIFE is visible to all injected scripts — no intermediate `<script>` tag needed.
+- **The build script (`build-userscript.cjs`) handles all this automatically.** Look at how `injectScript` uses Blob URLs and how icon data is set on `window` directly. If you change the build script, make sure these patterns are preserved.

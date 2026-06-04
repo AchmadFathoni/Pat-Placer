@@ -773,9 +773,12 @@
 
     document.body.appendChild(panel);
     state.ui = panel;
+    panel.style.display = 'none';
 
     // Event listeners
-    panel.querySelector('#patplacer-extractor-close').addEventListener('click', closeExtractor);
+    panel.querySelector('#patplacer-extractor-close').addEventListener('click', () => {
+      state.ui.style.display = 'none';
+    });
     panel.querySelector('#pp-extractor-start').addEventListener('click', startPixelCapture);
     panel.querySelector('#pp-extractor-clear').addEventListener('click', clearSelection);
     panel.querySelector('#pp-extractor-export-paste').addEventListener('click', exportForCopy);
@@ -876,10 +879,14 @@
   }
 
   function togglePanel() {
+    console.log('[Extractor] togglePanel called, state.ui:', !!state.ui, 'display:', state.ui?.style?.display);
     if (state.ui) {
       const isVisible = state.ui.style.display !== 'none';
+      console.log('[Extractor] togglePanel toggling to:', isVisible ? 'none' : 'flex');
       state.ui.style.display = isVisible ? 'none' : 'flex';
-      console.log('[Extractor] Panel toggled:', isVisible ? 'hidden' : 'visible');
+      console.log('[Extractor] togglePanel done, display now:', state.ui.style.display);
+    } else {
+      console.log('[Extractor] togglePanel: state.ui is null!');
     }
   }
 

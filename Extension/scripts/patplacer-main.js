@@ -2111,11 +2111,15 @@
   }
 
   function showPanel() {
+    console.log('[PatPlacer] showPanel called, panelVisible before:', state.panelVisible);
     const panel = document.getElementById(CONFIG.PANEL_ID) || createPanel();
-    panel.style.display = 'block';
+    console.log('[PatPlacer] showPanel panel found:', !!panel, 'id:', panel?.id);
+    if (panel) console.log('[PatPlacer] showPanel display before:', panel.style.display);
+    panel.style.display = 'flex';
     applyUiScale();
     state.panelVisible = true;
     window.postMessage({ source: 'patplacer-main', action: 'panelOpened' }, '*');
+    console.log('[PatPlacer] showPanel complete, display now:', panel.style.display);
   }
 
   function hidePanel() {
@@ -2128,11 +2132,13 @@
   }
 
   function togglePanel() {
+    console.log('[PatPlacer] togglePanel called, state.panelVisible:', state.panelVisible);
     if (state.panelVisible) {
       hidePanel();
     } else {
       showPanel();
     }
+    console.log('[PatPlacer] togglePanel done, panelVisible now:', state.panelVisible);
   }
 
   function updateStatus(message) {
@@ -6431,11 +6437,11 @@
     // This ensures we only use colors available to THIS user
     // extractColorPalette();
 
+    createPanel();
+    hidePanel();
+
     // Initialize image processor - wait a moment for it to be available
     await initImageProcessor();
-
-    createPanel();
-    showPanel();
 
     // Setup observer to capture colors when user opens palette
     setupColorPaletteObserver();
