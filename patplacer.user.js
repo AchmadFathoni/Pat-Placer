@@ -13,7 +13,7 @@
 (function() {
   'use strict';
 
-  const BASE = 'https://cdn.jsdelivr.net/gh/Patricklumowa/Pat-Placer@tampermonkey/Extension';
+  const BASE = 'https://cdn.jsdelivr.net/gh/AchmadFathoni/Pat-Placer@tampermonkey/Extension';
 
   // Set up icon base URL — tool scripts check this at runtime
   window.__PATPLACER_RESOURCES__ = window.__PATPLACER_RESOURCES__ || {};

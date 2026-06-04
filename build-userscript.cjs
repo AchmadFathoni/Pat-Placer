@@ -13,14 +13,17 @@ const ROOT = __dirname;
 // ─── Auto-detect repo info from git ──────────────────────────────────────────
 function getGitInfo() {
   try {
-    const remote = execSync('git remote get-url origin', { encoding: 'utf-8' }).trim();
-    const m = remote.match(/github\.com[/:]([\w-]+)\/([\w-]+?)(?:\.git)?$/);
-    const owner = m ? m[1] : 'Patricklumowa';
+    // Use the upstream tracking remote (e.g., AchmadFathoni from refs/remotes/AchmadFathoni/tampermonkey)
+    const upstream = execSync('git rev-parse --abbrev-ref --symbolic-full-name @{upstream}', { encoding: 'utf-8' }).trim();
+    const remoteName = upstream.replace(/^refs\/remotes\//, '').split('/')[0];
+    const remoteUrl = execSync(`git remote get-url ${remoteName}`, { encoding: 'utf-8' }).trim();
+    const m = remoteUrl.match(/github\.com[/:]([\w-]+)\/([\w-]+?)(?:\.git)?$/);
+    const owner = m ? m[1] : 'AchmadFathoni';
     const repo = m ? m[2] : 'Pat-Placer';
     const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf-8' }).trim();
     return { owner, repo, branch };
   } catch {
-    return { owner: 'Patricklumowa', repo: 'Pat-Placer', branch: 'main' };
+    return { owner: 'AchmadFathoni', repo: 'Pat-Placer', branch: 'main' };
   }
 }
 
