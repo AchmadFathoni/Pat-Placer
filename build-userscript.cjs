@@ -79,21 +79,22 @@ function jsStringEscape(code) {
 }
 
 // ─── Generate inline icon map (base64 data URIs, no external resources) ────
-let iconMapEntries = '';
+const iconMapObject = {};
 for (const name of iconFiles) {
-  const b64 = icons[name];
-  iconMapEntries += `  '${name}': '${b64}',\n`;
+  iconMapObject[name] = icons[name];
 }
+const iconMapJson = JSON.stringify(iconMapObject);
 
 // Bypass GM sandbox: inject icons directly into page context
+// Uses JSON.stringify at runtime to avoid quoting conflicts in script.textContent
 const iconInjectCode = `
+  const iconData = ${iconMapJson};
   const iconInjectScript = document.createElement('script');
   iconInjectScript.id = 'patplacer-icons-inject';
-  iconInjectScript.textContent = 'window.__PATPLACER_ICONS__ = {\\n${iconMapEntries}};' +
+  iconInjectScript.textContent = 'window.__PATPLACER_ICONS__ = ' + JSON.stringify(iconData) + ';' +
     'window.__PP_ICON = function(name) { return window.__PATPLACER_ICONS__ && window.__PATPLACER_ICONS__[name] || ""; };' +
     'window.__PATPLACER_RESOURCES__ = window.__PATPLACER_RESOURCES__ || {};' +
-    'window.__PATPLACER_RESOURCES__.iconsBaseUrl = "";' +
-    'console.log("[PatPlacer] Icons ready: " + Object.keys(window.__PATPLACER_ICONS__).length);';
+    'window.__PATPLACER_RESOURCES__.iconsBaseUrl = "";';
   document.head.appendChild(iconInjectScript);
 `;
 
