@@ -37,3 +37,15 @@ Extension/                 ← load this folder as unpacked extension in chrome:
 - **`Patplacer.zip`** in the Extension folder is a distribution artifact. Don't modify it inline; rebuild if needed.
 - **Progress saves at placement time, not paint-confirmation time.** wplace's Paint button uses an opaque API (not `fetch`, `XMLHttpRequest`, or `sendBeacon`), so it cannot be intercepted from MAIN world. Progress is saved to IndexedDB immediately after drafts are pushed to wplace's draft Map in `placeNextBatch()`.
 - **IndexedDB key schema:** `PatPlacerDB` v2 uses out-of-line keys. If the store was created with v1 (in-line keys), `onupgradeneeded` drops and recreates it. Any agent touching the `IDB` module must bump `DB_VERSION` on schema changes.
+
+## Userscript build (`build-userscript.cjs`)
+
+`node build-userscript.cjs` produces `patplacer.user.js` — a self-contained Tampermonkey/Greasemonkey userscript. It has **zero npm dependencies** (only built-in `fs` and `path`).
+
+**How it works:**
+1. Reads source files from `Extension/` (4 JS tool scripts, `patplacer.css`, functional `.png` icons).
+2. Base64-encodes icon PNGs into `data:` URIs stored in an in-memory map. Aesthetic/decorative icons (alien, dragon, wizard, etc.) are excluded.
+3. Transforms JS icon path references — replaces `ICON_BASE`/`iconBase` variable declarations with `""`, and rewrites `` `${iconBase}name.png` `` patterns to `__PP_ICON('name.png')` calls. The runtime `__PP_ICON` function looks up the pre-embedded base64 map.
+4. Assembles a single IIFE with the Tampermonkey metadata block, an inline icon-injection `<script>` tag, CSS via `GM_addStyle()`, all 4 tool scripts injected into MAIN world, and the button-injection logic (from `content.js`) with a `MutationObserver`.
+
+**Why no external resources:** Everything is inlined — CSS is escaped as a JS string literal, JS sources are embedded as script tags, icons are base64 data URIs, SVG button icons are inline strings. No network requests, no CDN, no `npm install`.
