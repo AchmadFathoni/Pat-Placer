@@ -11,14 +11,21 @@ const ICONS_DIR = path.join(EXT, 'icons');
 const SCRIPTS_DIR = path.join(EXT, 'scripts');
 const STYLES_DIR = path.join(EXT, 'styles');
 
-// ─── Read and base64-encode icons ──────────────────────────────────────────
+// ─── Icons to exclude (aesthetic floating decorations + unused) ────────────
+const EXCLUDE_ICONS = new Set([
+  'alien.png', 'alien-alt.png', 'axe.png', 'barrel.png', 'dragon.png',
+  'girl.png', 'gun.png', 'mappin.png', 'monster.png', 'night-sky.png',
+  'robot.png', 'triangle.png', 'wizard.png'
+]);
+
+// ─── Read and base64-encode icons (functional only) ───────────────────────
 const icons = {};
-const iconFiles = fs.readdirSync(ICONS_DIR).filter(f => f.endsWith('.png'));
+const iconFiles = fs.readdirSync(ICONS_DIR).filter(f => f.endsWith('.png') && !EXCLUDE_ICONS.has(f));
 iconFiles.forEach(f => {
   const data = fs.readFileSync(path.join(ICONS_DIR, f));
   icons[f] = `data:image/png;base64,${data.toString('base64')}`;
 });
-console.log(`Encoded ${iconFiles.length} icons`);
+console.log(`Encoded ${iconFiles.length} functional icons (${Object.keys(EXCLUDE_ICONS).filter(k => fs.existsSync(path.join(ICONS_DIR, k))).length} aesthetic/unused excluded)`);
 
 // ─── Read source files ─────────────────────────────────────────────────────
 const cssContent = fs.readFileSync(path.join(STYLES_DIR, 'patplacer.css'), 'utf-8');
@@ -28,8 +35,6 @@ const artExtractorCode = fs.readFileSync(path.join(SCRIPTS_DIR, 'art-extractor.j
 const repairToolCode = fs.readFileSync(path.join(SCRIPTS_DIR, 'repair-tool.js'), 'utf-8');
 
 // ─── Transform JS: Replace icon references ─────────────────────────────────
-// Replaces ${iconBase}name.png → ${__PP_ICON('name.png')}
-// Neutralizes const ICON_BASE / iconBase declarations
 function transformIconRefs(code) {
   // Neutralize iconBase/ICON_BASE variable declarations
   code = code.replace(
@@ -63,7 +68,6 @@ function transformIconRefs(code) {
 const processedPatplacerMain = transformIconRefs(patPlacerMainCode);
 const processedArtExtractor = transformIconRefs(artExtractorCode);
 const processedRepairTool = transformIconRefs(repairToolCode);
-// image-processor.js doesn't use icons
 
 // ─── Escape code for embedding as JavaScript string literal ─────────────────
 function jsStringEscape(code) {
@@ -74,29 +78,18 @@ function jsStringEscape(code) {
     .replace(/\r/g, '\\r');
 }
 
-// ─── Generate @resource lines + resource key map ──────────────────────────
-let resourceLines = '';
-let resourceKeyMap = '';
+// ─── Generate inline icon map (base64 data URIs, no external resources) ────
+let iconMapEntries = '';
 for (const name of iconFiles) {
-  const key = 'ICON_' + name.replace(/[.-]/g, '_').toUpperCase();
-  const data = fs.readFileSync(path.join(ICONS_DIR, name));
-  resourceLines += `// @resource     ${key} data:image/png;base64,${data.toString('base64')}\n`;
-  resourceKeyMap += `  '${name}': '${key}',\n`;
+  const b64 = icons[name];
+  iconMapEntries += `  '${name}': '${b64}',\n`;
 }
 
-// ─── Generate icon resolution runtime code ─────────────────────────────────
-const iconResolutionCode = `
-  // Resolve icon URLs via GM_getResourceURL and inject into page context
-  const ICON_RESOURCE_MAP = {
-${resourceKeyMap}  };
-  const resolvedIconUrls = {};
-  for (const [name, key] of Object.entries(ICON_RESOURCE_MAP)) {
-    resolvedIconUrls[name] = GM_getResourceURL(key);
-  }
-
+// Bypass GM sandbox: inject icons directly into page context
+const iconInjectCode = `
   const iconInjectScript = document.createElement('script');
   iconInjectScript.id = 'patplacer-icons-inject';
-  iconInjectScript.textContent = 'window.__PATPLACER_ICONS__ = ' + JSON.stringify(resolvedIconUrls) + ';' +
+  iconInjectScript.textContent = 'window.__PATPLACER_ICONS__ = {\\n${iconMapEntries}};' +
     'window.__PP_ICON = function(name) { return window.__PATPLACER_ICONS__ && window.__PATPLACER_ICONS__[name] || ""; };' +
     'window.__PATPLACER_RESOURCES__ = window.__PATPLACER_RESOURCES__ || {};' +
     'window.__PATPLACER_RESOURCES__.iconsBaseUrl = "";' +
@@ -114,13 +107,12 @@ const userScript = `// ==UserScript==
 // @match        https://wplace.live/*
 // @match        https://*.wplace.live/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=wplace.live
-// @grant        GM_getResourceURL
 // @grant        GM_addStyle
-${resourceLines}// ==/UserScript==
+// ==/UserScript==
 
 (function() {
   'use strict';
-${iconResolutionCode}
+${iconInjectCode}
   // Inject CSS
   GM_addStyle('${jsStringEscape(cssContent)}');
 
