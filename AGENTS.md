@@ -40,19 +40,24 @@ Extension/                 ← load this folder as unpacked extension in chrome:
 
 ## Userscript build (`build-userscript.cjs`)
 
-`node build-userscript.cjs` produces `patplacer.user.js` — a self-contained Tampermonkey/Greasemonkey userscript. It has **zero npm dependencies** (only built-in `fs` and `path`).
+`node build-userscript.cjs` produces `patplacer.user.js` — a thin (~8 KB) Tampermonkey/Greasemonkey userscript that **loads everything from jsDelivr CDN at runtime** instead of inlining source. It has **zero npm dependencies** (only built-in `fs`, `path`, `child_process`).
 
 **How it works:**
-1. Reads source files from `Extension/` (4 JS tool scripts, `patplacer.css`, functional `.png` icons).
-2. Base64-encodes icon PNGs into `data:` URIs stored in an in-memory map. Aesthetic/decorative icons (alien, dragon, wizard, etc.) are excluded.
-3. Transforms JS icon path references — replaces `ICON_BASE`/`iconBase` variable declarations with `""`, and rewrites `` `${iconBase}name.png` `` patterns to `__PP_ICON('name.png')` calls. The runtime `__PP_ICON` function looks up the pre-embedded base64 map.
-4. Assembles a single IIFE with the Tampermonkey metadata block, an inline icon-injection `<script>` tag, CSS via `GM_addStyle()`, all 4 tool scripts injected into MAIN world, and the button-injection logic (from `content.js`) with a `MutationObserver`.
+1. Auto-detects repo info (`OWNER`, `REPO`, `BRANCH`) from the git upstream tracking remote, with env-var overrides. Defaults to `AchmadFathoni/Pat-Placer@main` if detection fails.
+2. Constructs a base URL: `https://cdn.jsdelivr.net/gh/${OWNER}/${REPO}@${BRANCH}/Extension`.
+3. Writes a small IIFE that:
+   - Sets `window.__PATPLACER_RESOURCES__.iconsBaseUrl` to `${BASE}/icons/` so tool scripts resolve icon paths.
+   - `fetch`es `${BASE}/styles/patplacer.css` and injects it via a `<style>` tag in `document.head` (manual, to avoid `@grant`).
+   - `fetch`es each of the 4 tool scripts in parallel and injects them as Blob-URL `<script>` tags (CSP-safe on Firefox).
+   - On success, runs the button-injection logic (from `content.js`) with a `MutationObserver` to attach the three toolbar buttons to wplace.live's UI.
 
-**Why no external resources:** Everything is inlined — CSS is escaped as a JS string literal, JS sources are embedded as script tags, icons are base64 data URIs, SVG button icons are inline strings. No network requests, no CDN, no `npm install`.
+**Override defaults:** `OWNER=foo REPO=bar BRANCH=dev node build-userscript.cjs`.
+
+**No source inlining:** JS, CSS, and icons all live in the repo and are served via jsDelivr. The userscript contains no source code other than the loader itself. To update tool scripts, just push to the tracked branch — jsDelivr serves the latest commit.
 
 ## Firefox CSP & Tampermonkey sandbox (important — easy to break)
 
 - **`@grant none` is required on Firefox.** Any `@grant` (like `GM_addStyle`) activates Firefox's XrayWrapper sandbox, isolating the userscript's `window` from the page's `window`. Injected `<script>` tags set globals on the page's `window`, but the userscript reads from the sandbox's `window` — different objects. Always use `@grant none` and inject CSS manually via `document.createElement('style')`.
 - **No `<script>` injection via `textContent` on Firefox.** Firefox's CSP3 treats `'unsafe-inline'` as covering only scripts in the initial HTML, not dynamically created ones. Use `Blob` URLs instead: `script.src = URL.createObjectURL(new Blob([code], {type: 'application/javascript'}))`. The CSP includes `blob:` in `script-src`.
-- **Set `window` globals directly.** With `@grant none`, the userscript runs in the page context, so `window.__PATPLACER_ICONS__ = {...}` in the IIFE is visible to all injected scripts — no intermediate `<script>` tag needed.
+- **Set `window` globals directly.** With `@grant none`, the userscript runs in the page context, so `window.__PATPLACER_RESOURCES__ = {...}` in the IIFE is visible to all injected scripts — no intermediate `<script>` tag needed.
 - **The build script (`build-userscript.cjs`) handles all this automatically.** Look at how `injectScript` uses Blob URLs and how icon data is set on `window` directly. If you change the build script, make sure these patterns are preserved.
